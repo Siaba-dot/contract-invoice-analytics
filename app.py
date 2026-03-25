@@ -619,6 +619,46 @@ def current_month_errors_report(df, report_date):
     return result
 
 
+
+def season_switch_kpi(df, report_date):
+    client_col = client_column_name(df)
+    contract_col = contract_column_name(df)
+    obj_col = object_column_name(df)
+
+    next_month_start = pd.Timestamp(report_date.year, report_date.month, 1) + pd.offsets.MonthBegin(1)
+    prev_month_end = next_month_start - pd.Timedelta(days=1)
+
+    rows = []
+    for _, row in df.iterrows():
+        winter_end = row.get("Žiemos sezonas galioja iki", pd.NaT)
+        summer_end = row.get("Vasaros sezonas galioja iki", pd.NaT)
+
+        if pd.notna(winter_end) and winter_end != INDEFINITE_DATE and winter_end == prev_month_end:
+            rows.append({
+                "Klientas": row.get(client_col, "") if client_col else "",
+                "Sutarties Nr.": row.get(contract_col, "") if contract_col else "",
+                "Objektas / adresas": row.get(obj_col, "") if obj_col else "",
+                "Pokytis": "Nuo kito mėnesio taikyti vasaros sezoną",
+                "Sezonas pasibaigė": winter_end.date(),
+                "Taikyti nuo": next_month_start.date(),
+            })
+
+        if pd.notna(summer_end) and summer_end != INDEFINITE_DATE and summer_end == prev_month_end:
+            rows.append({
+                "Klientas": row.get(client_col, "") if client_col else "",
+                "Sutarties Nr.": row.get(contract_col, "") if contract_col else "",
+                "Objektas / adresas": row.get(obj_col, "") if obj_col else "",
+                "Pokytis": "Nuo kito mėnesio taikyti žiemos sezoną",
+                "Sezonas pasibaigė": summer_end.date(),
+                "Taikyti nuo": next_month_start.date(),
+            })
+
+    out = pd.DataFrame(rows)
+    if not out.empty:
+        out = out.sort_values(["Taikyti nuo", "Klientas", "Sutarties Nr."]).reset_index(drop=True)
+    return out
+
+
 def build_export_excel(frames_dict):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -678,6 +718,7 @@ total_valid_df = build_total_valid_series(flow_df, timeline, analysis_df_all)
 unissued_df = summarize_unissued_active_only(analysis_df, timeline)
 status_df = contract_status_report(analysis_df_all, report_date)
 errors_df = current_month_errors_report(analysis_df_all, report_date)
+season_switch_df = season_switch_kpi(analysis_df_all, report_date)
 
 client_col = client_column_name(analysis_df_all)
 obj_col = object_column_name(analysis_df_all)
@@ -688,7 +729,7 @@ indefinite_count = int((contract_types == "Neterminuota").sum())
 terminated_this_month_count = len(ending_this_month_df)
 current_unissued_count = int(unissued_df.iloc[-1]["Neišrašyta"]) if not unissued_df.empty else 0
 
-k1, k2, k3, k4 = st.columns(4)
+k1, k2, k3, k4, k5, k6 = st.columns(6)
 with k1:
     render_kpi_card("Šiuo metu aktyvių sutarčių", active_contracts_count, "Skaičiuojama pagal ataskaitos datą")
 with k2:
@@ -697,10 +738,25 @@ with k3:
     render_kpi_card("Baigiasi šį mėnesį", terminated_this_month_count, "Imama iš pilno istorinio rinkinio")
 with k4:
     render_kpi_card("Paskutinio mėnesio neišrašyta", current_unissued_count, "Tik galiojančioms sutartims")
-
-k5, _ = st.columns([1, 3])
 with k5:
+    if len(season_switch_df) > 0:
+        render_kpi_card("⚠️ Keisti sezoną nuo 1 d.", len(season_switch_df), "Nuo sekančio mėnesio reikia taikyti kitą sezoną")
+    else:
+        render_kpi_card("Sezonų pokyčių nėra", "0", "Nuo sekančio mėnesio keitimų nereikia")
+with k6:
     render_kpi_card("Einamojo mėnesio klaidų įrašai", len(errors_df), "Imamos tik eilutės, kur Data nėra tuščia")
+
+
+section_header(
+    "Sezono pakeitimo priminimas nuo kito mėnesio 1 dienos",
+    "Rodoma, kai praėjusio mėnesio paskutinę dieną baigėsi sezonas, todėl nuo naujo mėnesio aktams ir sąskaitoms reikia taikyti kitą sezoną."
+)
+if season_switch_df.empty:
+    st.success("Šiuo metu nėra sutarčių, kurioms nuo naujo mėnesio reikėtų pakeisti sezoną.")
+else:
+    st.dataframe(season_switch_df, use_container_width=True)
+section_footer()
+
 
 with st.expander("Techninis patikrinimas"):
     st.write("Rasti mėnesių stulpeliai iš Excel:", [str(c) for c in month_columns])
@@ -847,12 +903,13 @@ else:
 section_footer()
 
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "Aktyvios sutartys",
     "Neišrašyta pagal mėnesius",
     "Srautai + viso galiojančių",
     "Portfelis mėnesio pabaigoje",
     "Statuso ataskaita",
+    "Sezono pakeitimo priminimai",
     "Einamojo mėnesio klaidos",
     "Visa lentelė",
 ])
@@ -877,9 +934,12 @@ with tab5:
     st.dataframe(status_df, use_container_width=True)
 
 with tab6:
-    st.dataframe(errors_df, use_container_width=True)
+    st.dataframe(season_switch_df, use_container_width=True)
 
 with tab7:
+    st.dataframe(errors_df, use_container_width=True)
+
+with tab8:
     st.dataframe(analysis_df_all, use_container_width=True)
 
 excel_bytes = build_export_excel({
@@ -890,6 +950,7 @@ excel_bytes = build_export_excel({
     "Sezonai": season_df,
     "Baigiasi si menesi": ending_this_month_df,
     "Statuso ataskaita": status_df,
+    "Sezono pakeitimo priminimai": season_switch_df,
     "Einamojo menesio klaidos": errors_df,
     "Pilnas analizes rinkinys": analysis_df_all,
 })
