@@ -15,6 +15,9 @@ MONTH_TO_NUM = {m: i + 1 for i, m in enumerate(LT_MONTHS)}
 INDEFINITE_DATE = pd.Timestamp("2100-12-31")
 
 
+# =========================
+# STILIUS
+# =========================
 def inject_css():
     st.markdown(
         """
@@ -162,6 +165,9 @@ def section_footer():
     st.markdown("</div>", unsafe_allow_html=True)
 
 
+# =========================
+# PAGALBINĖS FUNKCIJOS
+# =========================
 def normalize_text(value):
     if pd.isna(value):
         return ""
@@ -581,7 +587,6 @@ def contract_status_report(df, report_date):
     return report
 
 
-
 def current_month_errors_report(df, report_date):
     if "Data" not in df.columns:
         return pd.DataFrame(columns=["Klientas", "Sutarties Nr.", "Objektas / adresas", "Data", "Klaidos"])
@@ -619,43 +624,57 @@ def current_month_errors_report(df, report_date):
     return result
 
 
-
 def season_switch_kpi(df, report_date):
     client_col = client_column_name(df)
     contract_col = contract_column_name(df)
     obj_col = object_column_name(df)
 
-    next_month_start = pd.Timestamp(report_date.year, report_date.month, 1) + pd.offsets.MonthBegin(1)
-    prev_month_end = next_month_start - pd.Timedelta(days=1)
+    current_month_start = pd.Timestamp(report_date.year, report_date.month, 1)
+    previous_month = current_month_start - pd.offsets.MonthBegin(1)
+    previous_month_year = previous_month.year
+    previous_month_num = previous_month.month
+    current_month_start_only = current_month_start.date()
 
     rows = []
     for _, row in df.iterrows():
         winter_end = row.get("Žiemos sezonas galioja iki", pd.NaT)
         summer_end = row.get("Vasaros sezonas galioja iki", pd.NaT)
 
-        if pd.notna(winter_end) and winter_end != INDEFINITE_DATE and winter_end == prev_month_end:
+        if (
+            pd.notna(winter_end)
+            and winter_end != INDEFINITE_DATE
+            and winter_end.year == previous_month_year
+            and winter_end.month == previous_month_num
+        ):
             rows.append({
                 "Klientas": row.get(client_col, "") if client_col else "",
                 "Sutarties Nr.": row.get(contract_col, "") if contract_col else "",
                 "Objektas / adresas": row.get(obj_col, "") if obj_col else "",
-                "Pokytis": "Nuo kito mėnesio taikyti vasaros sezoną",
+                "Pokytis": "Nuo šio mėnesio taikyti vasaros sezoną",
                 "Sezonas pasibaigė": winter_end.date(),
-                "Taikyti nuo": next_month_start.date(),
+                "Taikyti nuo": current_month_start_only,
             })
 
-        if pd.notna(summer_end) and summer_end != INDEFINITE_DATE and summer_end == prev_month_end:
+        if (
+            pd.notna(summer_end)
+            and summer_end != INDEFINITE_DATE
+            and summer_end.year == previous_month_year
+            and summer_end.month == previous_month_num
+        ):
             rows.append({
                 "Klientas": row.get(client_col, "") if client_col else "",
                 "Sutarties Nr.": row.get(contract_col, "") if contract_col else "",
                 "Objektas / adresas": row.get(obj_col, "") if obj_col else "",
-                "Pokytis": "Nuo kito mėnesio taikyti žiemos sezoną",
+                "Pokytis": "Nuo šio mėnesio taikyti žiemos sezoną",
                 "Sezonas pasibaigė": summer_end.date(),
-                "Taikyti nuo": next_month_start.date(),
+                "Taikyti nuo": current_month_start_only,
             })
 
     out = pd.DataFrame(rows)
     if not out.empty:
         out = out.sort_values(["Taikyti nuo", "Klientas", "Sutarties Nr."]).reset_index(drop=True)
+        if contract_col and "Sutarties Nr." in out.columns:
+            out = out.drop_duplicates(subset=["Sutarties Nr."])
     return out
 
 
@@ -668,6 +687,9 @@ def build_export_excel(frames_dict):
     return output
 
 
+# =========================
+# APP
+# =========================
 inject_css()
 
 st.markdown('<div class="main-title">📊 Sutarčių ir sąskaitų<br>registras</div>', unsafe_allow_html=True)
@@ -740,23 +762,21 @@ with k4:
     render_kpi_card("Paskutinio mėnesio neišrašyta", current_unissued_count, "Tik galiojančioms sutartims")
 with k5:
     if len(season_switch_df) > 0:
-        render_kpi_card("⚠️ Keisti sezoną nuo 1 d.", len(season_switch_df), "Nuo sekančio mėnesio reikia taikyti kitą sezoną")
+        render_kpi_card("⚠️ Keisti sezoną nuo 1 d.", len(season_switch_df), "Praėjusį mėnesį baigėsi sezonas, todėl nuo šio mėnesio reikia taikyti kitą")
     else:
-        render_kpi_card("Sezonų pokyčių nėra", "0", "Nuo sekančio mėnesio keitimų nereikia")
+        render_kpi_card("Sezonų pokyčių nėra", "0", "Nuo šio mėnesio keitimų nereikia")
 with k6:
     render_kpi_card("Einamojo mėnesio klaidų įrašai", len(errors_df), "Imamos tik eilutės, kur Data nėra tuščia")
 
-
 section_header(
-    "Sezono pakeitimo priminimas nuo kito mėnesio 1 dienos",
-    "Rodoma, kai praėjusio mėnesio paskutinę dieną baigėsi sezonas, todėl nuo naujo mėnesio aktams ir sąskaitoms reikia taikyti kitą sezoną."
+    "Sezono pakeitimo priminimas nuo šio mėnesio 1 dienos",
+    "Rodoma, kai praėjusį mėnesį baigėsi sezonas, todėl nuo einamojo mėnesio aktams ir sąskaitoms reikia taikyti kitą sezoną."
 )
 if season_switch_df.empty:
-    st.success("Šiuo metu nėra sutarčių, kurioms nuo naujo mėnesio reikėtų pakeisti sezoną.")
+    st.success("Šiuo metu nėra sutarčių, kurioms nuo šio mėnesio reikėtų pakeisti sezoną.")
 else:
     st.dataframe(season_switch_df, use_container_width=True)
 section_footer()
-
 
 with st.expander("Techninis patikrinimas"):
     st.write("Rasti mėnesių stulpeliai iš Excel:", [str(c) for c in month_columns])
@@ -891,17 +911,15 @@ section_header(
 st.dataframe(status_df, use_container_width=True)
 section_footer()
 
-
 section_header(
     "Einamojo mėnesio klaidos / pakeitimai",
-    "Rodomos tik tos eilutės, kur įrašyta Data ir ji patenka į einamąjį mėnesį."
+    "Rodomos tik tos eilutės, kur įrašyta Data ir ji patenka į einamą mėnesį."
 )
 if errors_df.empty:
     st.info("Einamajam mėnesiui įrašų su Data nerasta.")
 else:
     st.dataframe(errors_df, use_container_width=True)
 section_footer()
-
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "Aktyvios sutartys",
@@ -958,6 +976,6 @@ excel_bytes = build_export_excel({
 st.download_button(
     label="⬇️ Atsisiųsti analizės Excel",
     data=excel_bytes,
-    file_name="sutarciu_ir_saskaitu_analize_dizainas_atnaujintas.xlsx",
+    file_name="sutarciu_ir_saskaitu_analize_galutine.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
