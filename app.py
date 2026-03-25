@@ -27,7 +27,7 @@ def inject_css():
         }
 
         .block-container {
-            padding-top: 1.2rem;
+            padding-top: 3rem;
             padding-bottom: 2rem;
         }
 
