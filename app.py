@@ -415,11 +415,10 @@ if not month_columns:
 
 if use_unique_contracts:
     analysis_df, aggregated, contract_id_col = aggregate_contracts(df, month_columns)
-analysis_df = filter_only_valid_contracts(analysis_df, report_date)
+    analysis_df = filter_only_valid_contracts(analysis_df, report_date)
 else:
     analysis_df, aggregated, contract_id_col = df.copy(), False, contract_column_name(df)
-analysis_df = filter_only_valid_contracts(analysis_df, report_date)
-
+    analysis_df = filter_only_valid_contracts(analysis_df, report_date)
 timeline = build_timeline(month_columns, start_year)
 
 active_df = current_active_contracts(analysis_df, report_date)
