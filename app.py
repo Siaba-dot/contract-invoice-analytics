@@ -189,7 +189,7 @@ def aggregate_contracts(df, month_columns):
             continue
         if col in month_columns:
             agg_map[col] = _merge_status_series
-        elif col in ["Galioja nuo"]:
+        elif col == "Galioja nuo":
             agg_map[col] = _min_non_null
         elif col in ["Galioja iki", "Žiemos sezonas galioja iki", "Vasaros sezonas galioja iki", "Data"]:
             agg_map[col] = _max_non_null
@@ -211,10 +211,8 @@ def is_contract_active_on(row, check_date):
 
     if pd.notna(start) and check_date < start:
         return False
-
     if pd.notna(end) and end != INDEFINITE_DATE and check_date > end:
         return False
-
     return True
 
 
@@ -327,17 +325,11 @@ def summarize_unissued_active_only(df, timeline):
 
 def season_alerts(df, report_date):
     rows = []
-    active_df = current_active_contracts(df, report_date)
+    client_col = client_column_name(df)
+    contract_col = contract_column_name(df)
+    obj_col = object_column_name(df)
 
-    # only term contracts should have season changes
-    if "Galioja iki" in active_df.columns:
-        active_df = active_df[active_df["Galioja iki"] != INDEFINITE_DATE].copy()
-
-    client_col = client_column_name(active_df)
-    contract_col = contract_column_name(active_df)
-    obj_col = object_column_name(active_df)
-
-    for _, row in active_df.iterrows():
+    for _, row in df.iterrows():
         client_val = row[client_col] if client_col else ""
         contract_val = row[contract_col] if contract_col else ""
         obj_val = row[obj_col] if obj_col else ""
@@ -346,19 +338,27 @@ def season_alerts(df, report_date):
             ("Žiemos sezonas galioja iki", "Žiemos sezonas"),
             ("Vasaros sezonas galioja iki", "Vasaros sezonas"),
         ]:
-            if season_col in active_df.columns:
-                end_date = row.get(season_col, pd.NaT)
-                if pd.notna(end_date) and end_date >= report_date:
-                    rows.append(
-                        {
-                            "Klientas": client_val,
-                            "Sutarties Nr.": contract_val,
-                            "Objektas / adresas": obj_val,
-                            "Sezonas": season_name,
-                            "Galioja iki": end_date.date(),
-                            "Liko dienų": int((end_date - report_date).days),
-                        }
-                    )
+            if season_col not in df.columns:
+                continue
+
+            end_date = row.get(season_col, pd.NaT)
+            if pd.isna(end_date):
+                continue
+            if end_date == INDEFINITE_DATE:
+                continue
+            if end_date < report_date:
+                continue
+
+            rows.append(
+                {
+                    "Klientas": client_val,
+                    "Sutarties Nr.": contract_val,
+                    "Objektas / adresas": obj_val,
+                    "Sezonas": season_name,
+                    "Galioja iki": end_date.date(),
+                    "Liko dienų": int((end_date - report_date).days),
+                }
+            )
 
     if not rows:
         return pd.DataFrame(columns=["Klientas", "Sutarties Nr.", "Objektas / adresas", "Sezonas", "Galioja iki", "Liko dienų"])
@@ -513,7 +513,7 @@ st.divider()
 left, right = st.columns((1.1, 1))
 
 with left:
-    st.subheader("Sezonų pabaigos (tik terminuotoms aktyvioms sutartims)")
+    st.subheader("Sezonų pabaigos (imama iš sezono stulpelių, 2100-12-31 ignoruojama)")
     if season_df.empty:
         st.info("Tinkamų sezonų pabaigų nuo ataskaitos datos nerasta.")
     else:
@@ -566,6 +566,6 @@ excel_bytes = build_export_excel({
 st.download_button(
     label="⬇️ Atsisiųsti analizės Excel",
     data=excel_bytes,
-    file_name="sutarciu_ir_saskaitu_analize_unikalios_sutartys.xlsx",
+    file_name="sutarciu_ir_saskaitu_analize_pilna.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
