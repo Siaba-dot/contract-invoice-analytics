@@ -514,33 +514,32 @@ with st.expander("Techninis patikrinimas"):
 
 st.divider()
 
-left, right = st.columns((1.2, 1))
 
-with left:
-    st.subheader("Aktyvių sutarčių portfelis mėnesio pabaigoje")
-    fig_portfolio = px.line(portfolio_df, x="Mėnuo", y="Aktyvių sutarčių portfelis mėnesio pabaigoje", markers=True)
-    fig_portfolio.update_layout(xaxis_title="", yaxis_title="Sutarčių skaičius")
-    st.plotly_chart(fig_portfolio, use_container_width=True)
+st.subheader("Naujos, pasibaigusios ir viso galiojančių")
 
-with right:
-    st.subheader("Naujos, pasibaigusios ir viso galiojančių")
-    combo_fig = px.bar(
-        total_valid_df,
-        x="Mėnuo",
-        y=["Naujos sutartys", "Pasibaigusios sutartys"],
-        barmode="group"
-    )
-    combo_fig.add_scatter(
-        x=total_valid_df["Mėnuo"],
-        y=total_valid_df["Viso galiojančių"],
-        mode="lines+markers",
-        name="Viso galiojančių",
-        yaxis="y"
-    )
-    combo_fig.update_layout(xaxis_title="", yaxis_title="Sutarčių skaičius")
-    st.plotly_chart(combo_fig, use_container_width=True)
+combo_fig = px.bar(
+    total_valid_df,
+    x="Mėnuo",
+    y=["Naujos sutartys", "Pasibaigusios sutartys"],
+    barmode="group"
+)
+
+combo_fig.add_scatter(
+    x=total_valid_df["Mėnuo"],
+    y=total_valid_df["Viso galiojančių"],
+    mode="lines+markers",
+    name="Viso galiojančių"
+)
+
+combo_fig.update_layout(
+    xaxis_title="",
+    yaxis_title="Sutarčių skaičius"
+)
+
+st.plotly_chart(combo_fig, use_container_width=True)
 
 st.divider()
+
 
 left, right = st.columns((1.2, 1))
 
