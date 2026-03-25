@@ -227,6 +227,18 @@ def is_contract_active_in_month(row, month_start, month_end):
     return True
 
 
+
+def filter_only_valid_contracts(df, report_date):
+    if "Galioja iki" not in df.columns:
+        return df
+
+    return df[
+        (df["Galioja iki"].isna()) |
+        (df["Galioja iki"] == INDEFINITE_DATE) |
+        (df["Galioja iki"] >= report_date)
+    ].copy()
+
+
 def current_active_contracts(df, report_date):
     mask = df.apply(lambda r: is_contract_active_on(r, report_date), axis=1)
     return df[mask].copy()
@@ -403,8 +415,10 @@ if not month_columns:
 
 if use_unique_contracts:
     analysis_df, aggregated, contract_id_col = aggregate_contracts(df, month_columns)
+analysis_df = filter_only_valid_contracts(analysis_df, report_date)
 else:
     analysis_df, aggregated, contract_id_col = df.copy(), False, contract_column_name(df)
+analysis_df = filter_only_valid_contracts(analysis_df, report_date)
 
 timeline = build_timeline(month_columns, start_year)
 
