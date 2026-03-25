@@ -205,6 +205,17 @@ def aggregate_contracts(df, month_columns):
     return out, True, contract_col
 
 
+def filter_only_valid_contracts(df, report_date):
+    if "Galioja iki" not in df.columns:
+        return df
+
+    return df[
+        (df["Galioja iki"].isna()) |
+        (df["Galioja iki"] == INDEFINITE_DATE) |
+        (df["Galioja iki"] >= report_date)
+    ].copy()
+
+
 def is_contract_active_on(row, check_date):
     start = row.get("Galioja nuo", pd.NaT)
     end = row.get("Galioja iki", pd.NaT)
@@ -225,18 +236,6 @@ def is_contract_active_in_month(row, month_start, month_end):
     if pd.notna(end) and end != INDEFINITE_DATE and end < month_start:
         return False
     return True
-
-
-
-def filter_only_valid_contracts(df, report_date):
-    if "Galioja iki" not in df.columns:
-        return df
-
-    return df[
-        (df["Galioja iki"].isna()) |
-        (df["Galioja iki"] == INDEFINITE_DATE) |
-        (df["Galioja iki"] >= report_date)
-    ].copy()
 
 
 def current_active_contracts(df, report_date):
@@ -413,23 +412,26 @@ if not month_columns:
     st.error("Nepavyko rasti mėnesių stulpelių. Jie turi būti pavadinti Sausis, Vasaris, Kovas ir t. t.")
     st.stop()
 
+# full data for "ending this month"
 if use_unique_contracts:
-    analysis_df, aggregated, contract_id_col = aggregate_contracts(df, month_columns)
-    analysis_df = filter_only_valid_contracts(analysis_df, report_date)
+    analysis_df_all, aggregated, contract_id_col = aggregate_contracts(df, month_columns)
 else:
-    analysis_df, aggregated, contract_id_col = df.copy(), False, contract_column_name(df)
-    analysis_df = filter_only_valid_contracts(analysis_df, report_date)
+    analysis_df_all, aggregated, contract_id_col = df.copy(), False, contract_column_name(df)
+
+# filtered data for active analytics
+analysis_df = filter_only_valid_contracts(analysis_df_all, report_date)
+
 timeline = build_timeline(month_columns, start_year)
 
 active_df = current_active_contracts(analysis_df, report_date)
-ending_this_month_df = contracts_ending_this_month(analysis_df, report_date)
+ending_this_month_df = contracts_ending_this_month(analysis_df_all, report_date)
 season_df = season_alerts(analysis_df, report_date)
 workload_df = summarize_workload_by_month(analysis_df, timeline)
-flow_df = summarize_new_and_ended(analysis_df, timeline)
+flow_df = summarize_new_and_ended(analysis_df_all, timeline)
 unissued_df = summarize_unissued_active_only(analysis_df, timeline)
 
-client_col = client_column_name(analysis_df)
-obj_col = object_column_name(analysis_df)
+client_col = client_column_name(analysis_df_all)
+obj_col = object_column_name(analysis_df_all)
 
 contract_types = contract_type_series(active_df)
 active_contracts_count = len(active_df)
@@ -450,7 +452,9 @@ with st.expander("Techninis patikrinimas"):
     st.write("Sutarties numerio stulpelis:", contract_id_col if contract_id_col else "Nerastas")
     if aggregated:
         st.write("Eilučių prieš sujungimą:", len(df))
-        st.write("Unikalių sutarčių po sujungimo:", len(analysis_df))
+        st.write("Unikalių sutarčių po sujungimo:", len(analysis_df_all))
+    st.write("Aktyviai analizei naudojama sutarčių po filtro:", len(analysis_df))
+    st.write("Baigiasi šį mėnesį skaičiuojama iš pilno rinkinio:", len(ending_this_month_df))
 
 st.divider()
 
@@ -566,7 +570,7 @@ with tab3:
     st.dataframe(flow_df, use_container_width=True)
 
 with tab4:
-    st.dataframe(analysis_df, use_container_width=True)
+    st.dataframe(analysis_df_all, use_container_width=True)
 
 excel_bytes = build_export_excel({
     "Aktyvios sutartys": active_df,
@@ -574,11 +578,12 @@ excel_bytes = build_export_excel({
     "Sutarciu judejimas": flow_df,
     "Sezonai": season_df,
     "Baigiasi si menesi": ending_this_month_df,
+    "Pilnas analizes rinkinys": analysis_df_all,
 })
 
 st.download_button(
     label="⬇️ Atsisiųsti analizės Excel",
     data=excel_bytes,
-    file_name="sutarciu_ir_saskaitu_analize_pilna.xlsx",
+    file_name="sutarciu_ir_saskaitu_analize_galutine.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
