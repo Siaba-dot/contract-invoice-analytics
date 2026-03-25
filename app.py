@@ -581,6 +581,44 @@ def contract_status_report(df, report_date):
     return report
 
 
+
+def current_month_errors_report(df, report_date):
+    if "Data" not in df.columns:
+        return pd.DataFrame(columns=["Klientas", "Sutarties Nr.", "Objektas / adresas", "Data", "Klaidos"])
+
+    client_col = client_column_name(df)
+    contract_col = contract_column_name(df)
+    obj_col = object_column_name(df)
+
+    work = df.copy()
+    work = work[work["Data"].notna()].copy()
+    work = work[
+        (work["Data"].dt.month == report_date.month) &
+        (work["Data"].dt.year == report_date.year)
+    ].copy()
+
+    klaidos_col = None
+    for col in ["Klaidos", "Pastabos", "Komentaras", "Komentarai"]:
+        if col in work.columns:
+            klaidos_col = col
+            break
+
+    rows = []
+    for _, row in work.iterrows():
+        rows.append({
+            "Klientas": row.get(client_col, "") if client_col else "",
+            "Sutarties Nr.": row.get(contract_col, "") if contract_col else "",
+            "Objektas / adresas": row.get(obj_col, "") if obj_col else "",
+            "Data": row.get("Data"),
+            "Klaidos": row.get(klaidos_col, "") if klaidos_col else "",
+        })
+
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        result = result.sort_values(["Data", "Klientas", "Sutarties Nr."], ascending=[False, True, True]).reset_index(drop=True)
+    return result
+
+
 def build_export_excel(frames_dict):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -639,6 +677,7 @@ portfolio_df = summarize_portfolio_by_month(analysis_df, timeline)
 total_valid_df = build_total_valid_series(flow_df, timeline, analysis_df_all)
 unissued_df = summarize_unissued_active_only(analysis_df, timeline)
 status_df = contract_status_report(analysis_df_all, report_date)
+errors_df = current_month_errors_report(analysis_df_all, report_date)
 
 client_col = client_column_name(analysis_df_all)
 obj_col = object_column_name(analysis_df_all)
@@ -658,6 +697,10 @@ with k3:
     render_kpi_card("Baigiasi šį mėnesį", terminated_this_month_count, "Imama iš pilno istorinio rinkinio")
 with k4:
     render_kpi_card("Paskutinio mėnesio neišrašyta", current_unissued_count, "Tik galiojančioms sutartims")
+
+k5, _ = st.columns([1, 3])
+with k5:
+    render_kpi_card("Einamojo mėnesio klaidų įrašai", len(errors_df), "Imamos tik eilutės, kur Data nėra tuščia")
 
 with st.expander("Techninis patikrinimas"):
     st.write("Rasti mėnesių stulpeliai iš Excel:", [str(c) for c in month_columns])
@@ -792,12 +835,25 @@ section_header(
 st.dataframe(status_df, use_container_width=True)
 section_footer()
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+
+section_header(
+    "Einamojo mėnesio klaidos / pakeitimai",
+    "Rodomos tik tos eilutės, kur įrašyta Data ir ji patenka į einamąjį mėnesį."
+)
+if errors_df.empty:
+    st.info("Einamajam mėnesiui įrašų su Data nerasta.")
+else:
+    st.dataframe(errors_df, use_container_width=True)
+section_footer()
+
+
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "Aktyvios sutartys",
     "Neišrašyta pagal mėnesius",
     "Srautai + viso galiojančių",
     "Portfelis mėnesio pabaigoje",
     "Statuso ataskaita",
+    "Einamojo mėnesio klaidos",
     "Visa lentelė",
 ])
 
@@ -821,6 +877,9 @@ with tab5:
     st.dataframe(status_df, use_container_width=True)
 
 with tab6:
+    st.dataframe(errors_df, use_container_width=True)
+
+with tab7:
     st.dataframe(analysis_df_all, use_container_width=True)
 
 excel_bytes = build_export_excel({
@@ -831,6 +890,7 @@ excel_bytes = build_export_excel({
     "Sezonai": season_df,
     "Baigiasi si menesi": ending_this_month_df,
     "Statuso ataskaita": status_df,
+    "Einamojo menesio klaidos": errors_df,
     "Pilnas analizes rinkinys": analysis_df_all,
 })
 
