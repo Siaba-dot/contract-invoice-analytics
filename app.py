@@ -267,7 +267,7 @@ def contracts_ending_this_month(df, report_date):
     return df[mask].copy()
 
 
-def summarize_workload_by_month(df, timeline):
+def summarize_portfolio_by_month(df, timeline):
     rows = []
     for item in timeline:
         month_end = item["period_start"] + pd.offsets.MonthEnd(0)
@@ -301,9 +301,35 @@ def summarize_new_and_ended(df, timeline):
                 "Mėnuo": item["label"],
                 "Naujos sutartys": new_count,
                 "Pasibaigusios sutartys": ended_count,
-                "Balansas": new_count - ended_count,
             }
         )
+    return pd.DataFrame(rows)
+
+
+def build_total_valid_series(flow_df, timeline, analysis_df_all):
+    rows = []
+    if not timeline:
+        return pd.DataFrame(columns=["Mėnuo", "Naujos sutartys", "Pasibaigusios sutartys", "Viso galiojančių"])
+
+    first_month_end = timeline[0]["period_start"] + pd.offsets.MonthEnd(0)
+    running_total = int(analysis_df_all.apply(lambda r: is_contract_active_on(r, first_month_end), axis=1).sum())
+
+    for idx, row in flow_df.iterrows():
+        if idx == 0:
+            total_valid = running_total
+        else:
+            running_total = running_total + int(row["Naujos sutartys"]) - int(row["Pasibaigusios sutartys"])
+            total_valid = running_total
+
+        rows.append(
+            {
+                "Mėnuo": row["Mėnuo"],
+                "Naujos sutartys": int(row["Naujos sutartys"]),
+                "Pasibaigusios sutartys": int(row["Pasibaigusios sutartys"]),
+                "Viso galiojančių": int(total_valid),
+            }
+        )
+
     return pd.DataFrame(rows)
 
 
@@ -454,8 +480,9 @@ timeline = build_timeline(month_columns, start_year)
 active_df = current_active_contracts(analysis_df, report_date)
 ending_this_month_df = contracts_ending_this_month(analysis_df_all, report_date)
 season_df = season_alerts(analysis_df, report_date)
-workload_df = summarize_workload_by_month(analysis_df, timeline)
 flow_df = summarize_new_and_ended(analysis_df_all, timeline)
+portfolio_df = summarize_portfolio_by_month(analysis_df, timeline)
+total_valid_df = build_total_valid_series(flow_df, timeline, analysis_df_all)
 unissued_df = summarize_unissued_active_only(analysis_df, timeline)
 status_df = contract_status_report(analysis_df_all, report_date)
 
@@ -491,15 +518,27 @@ left, right = st.columns((1.2, 1))
 
 with left:
     st.subheader("Aktyvių sutarčių portfelis mėnesio pabaigoje")
-    fig_workload = px.line(workload_df, x="Mėnuo", y="Aktyvių sutarčių portfelis mėnesio pabaigoje", markers=True)
-    fig_workload.update_layout(xaxis_title="", yaxis_title="Sutarčių skaičius")
-    st.plotly_chart(fig_workload, use_container_width=True)
+    fig_portfolio = px.line(portfolio_df, x="Mėnuo", y="Aktyvių sutarčių portfelis mėnesio pabaigoje", markers=True)
+    fig_portfolio.update_layout(xaxis_title="", yaxis_title="Sutarčių skaičius")
+    st.plotly_chart(fig_portfolio, use_container_width=True)
 
 with right:
-    st.subheader("Naujos ir pasibaigusios sutartys")
-    fig_flow = px.bar(flow_df, x="Mėnuo", y=["Naujos sutartys", "Pasibaigusios sutartys"], barmode="group")
-    fig_flow.update_layout(xaxis_title="", yaxis_title="Sutarčių skaičius")
-    st.plotly_chart(fig_flow, use_container_width=True)
+    st.subheader("Naujos, pasibaigusios ir viso galiojančių")
+    combo_fig = px.bar(
+        total_valid_df,
+        x="Mėnuo",
+        y=["Naujos sutartys", "Pasibaigusios sutartys"],
+        barmode="group"
+    )
+    combo_fig.add_scatter(
+        x=total_valid_df["Mėnuo"],
+        y=total_valid_df["Viso galiojančių"],
+        mode="lines+markers",
+        name="Viso galiojančių",
+        yaxis="y"
+    )
+    combo_fig.update_layout(xaxis_title="", yaxis_title="Sutarčių skaičius")
+    st.plotly_chart(combo_fig, use_container_width=True)
 
 st.divider()
 
@@ -583,10 +622,11 @@ st.dataframe(status_df, use_container_width=True)
 
 st.divider()
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Aktyvios sutartys",
     "Neišrašyta pagal mėnesius",
-    "Sutarčių judėjimas",
+    "Srautai + viso galiojančių",
+    "Portfelis mėnesio pabaigoje",
     "Statuso ataskaita",
     "Visa lentelė",
 ])
@@ -602,18 +642,22 @@ with tab2:
     st.dataframe(unissued_df, use_container_width=True)
 
 with tab3:
-    st.dataframe(flow_df, use_container_width=True)
+    st.dataframe(total_valid_df, use_container_width=True)
 
 with tab4:
-    st.dataframe(status_df, use_container_width=True)
+    st.dataframe(portfolio_df, use_container_width=True)
 
 with tab5:
+    st.dataframe(status_df, use_container_width=True)
+
+with tab6:
     st.dataframe(analysis_df_all, use_container_width=True)
 
 excel_bytes = build_export_excel({
     "Aktyvios sutartys": active_df,
     "Neisrasyta pagal menesius": unissued_df,
-    "Sutarciu judejimas": flow_df,
+    "Srautai ir viso galiojanciu": total_valid_df,
+    "Portfelis menesio pabaigoje": portfolio_df,
     "Sezonai": season_df,
     "Baigiasi si menesi": ending_this_month_df,
     "Statuso ataskaita": status_df,
@@ -623,6 +667,6 @@ excel_bytes = build_export_excel({
 st.download_button(
     label="⬇️ Atsisiųsti analizės Excel",
     data=excel_bytes,
-    file_name="sutarciu_ir_saskaitu_analize_su_statusais.xlsx",
+    file_name="sutarciu_ir_saskaitu_analize_su_viso_galiojanciu.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
