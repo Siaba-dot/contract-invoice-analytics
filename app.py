@@ -32,10 +32,11 @@ def inject_css():
         }
 
         .main-title {
-            font-size: 2.2rem;
-            font-weight: 800;
+            font-size: 1.7rem;
+            font-weight: 700;
             color: #16324f;
             margin-bottom: 0.2rem;
+            line-height: 1.3;
         }
 
         .subtitle {
@@ -591,7 +592,7 @@ def build_export_excel(frames_dict):
 
 inject_css()
 
-st.markdown('<div class="main-title">📊 Sutarčių ir sąskaitų registras</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">📊 Sutarčių ir sąskaitų<br>registras</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="subtitle">Modernizuota sutarčių portfelio, sezoniškumo ir neišrašytų sąskaitų analitika viename lange.</div>',
     unsafe_allow_html=True
