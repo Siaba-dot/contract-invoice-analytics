@@ -15,6 +15,152 @@ MONTH_TO_NUM = {m: i + 1 for i, m in enumerate(LT_MONTHS)}
 INDEFINITE_DATE = pd.Timestamp("2100-12-31")
 
 
+def inject_css():
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background:
+                radial-gradient(circle at top left, rgba(74,144,226,0.10), transparent 28%),
+                radial-gradient(circle at top right, rgba(16,185,129,0.08), transparent 24%),
+                linear-gradient(180deg, #f7f9fc 0%, #eef3f8 100%);
+        }
+
+        .block-container {
+            padding-top: 1.2rem;
+            padding-bottom: 2rem;
+        }
+
+        .main-title {
+            font-size: 2.2rem;
+            font-weight: 800;
+            color: #16324f;
+            margin-bottom: 0.2rem;
+        }
+
+        .subtitle {
+            color: #5b6b7f;
+            font-size: 1rem;
+            margin-bottom: 1.4rem;
+        }
+
+        .section-card {
+            background: rgba(255,255,255,0.78);
+            border: 1px solid rgba(22,50,79,0.08);
+            border-radius: 22px;
+            padding: 1rem 1.1rem 1.1rem 1.1rem;
+            box-shadow: 0 10px 30px rgba(22,50,79,0.08);
+            backdrop-filter: blur(8px);
+            margin-bottom: 1rem;
+        }
+
+        .kpi-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f5f9ff 100%);
+            border: 1px solid rgba(29,78,216,0.10);
+            border-radius: 22px;
+            padding: 1rem 1.1rem;
+            box-shadow: 0 12px 28px rgba(29,78,216,0.08);
+            min-height: 120px;
+        }
+
+        .kpi-title {
+            font-size: 0.92rem;
+            color: #5b6b7f;
+            margin-bottom: 0.45rem;
+            font-weight: 600;
+        }
+
+        .kpi-value {
+            font-size: 2.1rem;
+            line-height: 1.1;
+            font-weight: 800;
+            color: #13315c;
+            margin-bottom: 0.3rem;
+        }
+
+        .kpi-note {
+            font-size: 0.82rem;
+            color: #6b7c93;
+        }
+
+        .small-badge {
+            display: inline-block;
+            background: #e8f1ff;
+            color: #1d4ed8;
+            border-radius: 999px;
+            padding: 0.22rem 0.6rem;
+            font-size: 0.78rem;
+            font-weight: 700;
+            margin-bottom: 0.6rem;
+        }
+
+        .section-title {
+            font-size: 1.45rem;
+            font-weight: 800;
+            color: #17324d;
+            margin-bottom: 0.1rem;
+        }
+
+        .section-subtitle {
+            color: #66768a;
+            font-size: 0.92rem;
+            margin-bottom: 0.8rem;
+        }
+
+        div[data-testid="stDataFrame"] {
+            border-radius: 18px;
+            overflow: hidden;
+            border: 1px solid rgba(22,50,79,0.08);
+            box-shadow: 0 10px 24px rgba(22,50,79,0.06);
+            background: white;
+        }
+
+        div[data-testid="stExpander"] details {
+            border-radius: 18px;
+            border: 1px solid rgba(22,50,79,0.08);
+            background: rgba(255,255,255,0.8);
+        }
+
+        section[data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #f7fbff 0%, #edf4fb 100%);
+            border-right: 1px solid rgba(22,50,79,0.06);
+        }
+
+        .footer-note {
+            color: #6b7c93;
+            font-size: 0.83rem;
+            margin-top: 0.3rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_kpi_card(title, value, note=""):
+    st.markdown(
+        f"""
+        <div class="kpi-card">
+            <div class="kpi-title">{title}</div>
+            <div class="kpi-value">{value}</div>
+            <div class="kpi-note">{note}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def section_header(title, subtitle=""):
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
+    if subtitle:
+        st.markdown(f'<div class="section-subtitle">{subtitle}</div>', unsafe_allow_html=True)
+
+
+def section_footer():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 def normalize_text(value):
     if pd.isna(value):
         return ""
@@ -443,7 +589,13 @@ def build_export_excel(frames_dict):
     return output
 
 
-st.title("📊 Sutarčių ir sąskaitų registras")
+inject_css()
+
+st.markdown('<div class="main-title">📊 Sutarčių ir sąskaitų registras</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="subtitle">Modernizuota sutarčių portfelio, sezoniškumo ir neišrašytų sąskaitų analitika viename lange.</div>',
+    unsafe_allow_html=True
+)
 
 uploaded_file = st.file_uploader("Įkelk Excel failą", type=["xlsx", "xls"])
 
@@ -455,6 +607,7 @@ excel_file = pd.ExcelFile(uploaded_file)
 sheet_names = excel_file.sheet_names
 
 with st.sidebar:
+    st.markdown('<span class="small-badge">Valdymas</span>', unsafe_allow_html=True)
     st.header("Nustatymai")
     selected_sheet = st.selectbox("Lapas", sheet_names)
     st.markdown("**Svarbu:** jei mėnesių stulpeliai prasideda ne nuo sausio, startinius metus įvesk taip, kaip prasideda pirmas mėnesio stulpelis.")
@@ -495,11 +648,15 @@ indefinite_count = int((contract_types == "Neterminuota").sum())
 terminated_this_month_count = len(ending_this_month_df)
 current_unissued_count = int(unissued_df.iloc[-1]["Neišrašyta"]) if not unissued_df.empty else 0
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Šiuo metu aktyvių sutarčių", active_contracts_count)
-c2.metric("Neterminuotos", indefinite_count)
-c3.metric("Baigiasi šį mėnesį", terminated_this_month_count)
-c4.metric("Paskutinio mėnesio neišrašyta", current_unissued_count)
+k1, k2, k3, k4 = st.columns(4)
+with k1:
+    render_kpi_card("Šiuo metu aktyvių sutarčių", active_contracts_count, "Skaičiuojama pagal ataskaitos datą")
+with k2:
+    render_kpi_card("Neterminuotos", indefinite_count, "Galiojimas iki 2100-12-31")
+with k3:
+    render_kpi_card("Baigiasi šį mėnesį", terminated_this_month_count, "Imama iš pilno istorinio rinkinio")
+with k4:
+    render_kpi_card("Paskutinio mėnesio neišrašyta", current_unissued_count, "Tik galiojančioms sutartims")
 
 with st.expander("Techninis patikrinimas"):
     st.write("Rasti mėnesių stulpeliai iš Excel:", [str(c) for c in month_columns])
@@ -512,50 +669,53 @@ with st.expander("Techninis patikrinimas"):
     st.write("Aktyviai analizei naudojama sutarčių po filtro:", len(analysis_df))
     st.write("Baigiasi šį mėnesį skaičiuojama iš pilno rinkinio:", len(ending_this_month_df))
 
-st.divider()
-
-
-st.subheader("Naujos, pasibaigusios ir viso galiojančių")
-
+section_header(
+    "Naujos, pasibaigusios ir viso galiojančių",
+    "Šitas grafikas geriausiai parodo portfelio judėjimą laike: srautą ir bendrą galiojančių kiekį."
+)
 combo_fig = px.bar(
     total_valid_df,
     x="Mėnuo",
     y=["Naujos sutartys", "Pasibaigusios sutartys"],
     barmode="group"
 )
-
 combo_fig.add_scatter(
     x=total_valid_df["Mėnuo"],
     y=total_valid_df["Viso galiojančių"],
     mode="lines+markers",
     name="Viso galiojančių"
 )
-
 combo_fig.update_layout(
     xaxis_title="",
-    yaxis_title="Sutarčių skaičius"
+    yaxis_title="Sutarčių skaičius",
+    legend_title_text="",
+    margin=dict(l=10, r=10, t=10, b=10),
 )
-
 st.plotly_chart(combo_fig, use_container_width=True)
-
-st.divider()
-
+st.markdown('<div class="footer-note">„Viso galiojančių“ skaičiuojama pagal logiką: praeitas mėnuo + naujos − pasibaigusios.</div>', unsafe_allow_html=True)
+section_footer()
 
 left, right = st.columns((1.2, 1))
 
 with left:
-    st.subheader("Neišrašytos sąskaitos pagal mėnesius (tik galiojančioms sutartims)")
+    section_header(
+        "Neišrašytos sąskaitos pagal mėnesius",
+        "Skaičiuojama tik toms sutartims, kurios konkrečiu mėnesiu buvo galiojančios."
+    )
     fig_unissued = px.bar(unissued_df, x="Mėnuo", y="Neišrašyta")
-    fig_unissued.update_layout(xaxis_title="", yaxis_title="Sutarčių su neišrašyta skaičius")
+    fig_unissued.update_layout(xaxis_title="", yaxis_title="Sutarčių su neišrašyta skaičius", margin=dict(l=10, r=10, t=10, b=10))
     st.plotly_chart(fig_unissued, use_container_width=True)
+    section_footer()
 
 with right:
-    st.subheader("% neišrašyta pagal mėnesius")
+    section_header(
+        "% neišrašyta pagal mėnesius",
+        "Santykinis rodiklis, leidžiantis matyti, ar problema mažėja ar didėja."
+    )
     fig_unissued_pct = px.line(unissued_df, x="Mėnuo", y="% neišrašyta", markers=True)
-    fig_unissued_pct.update_layout(xaxis_title="", yaxis_title="%")
+    fig_unissued_pct.update_layout(xaxis_title="", yaxis_title="%", margin=dict(l=10, r=10, t=10, b=10))
     st.plotly_chart(fig_unissued_pct, use_container_width=True)
-
-st.divider()
+    section_footer()
 
 selected_month_label = st.selectbox(
     "Pasirink mėnesį detaliai peržiūrai",
@@ -572,7 +732,10 @@ detail_df = analysis_df[
 ].copy()
 detail_df = detail_df[detail_df[selected_month_col] == "Neišrašyta"].copy()
 
-st.subheader(f"Neišrašytos sąskaitos / sutartys: {selected_month_label}")
+section_header(
+    f"Neišrašytos sąskaitos / sutartys: {selected_month_label}",
+    "Detalus pjūvis, kad iš karto matytum, kurie klientai ir sutartys lieka neišrašyti."
+)
 if detail_df.empty:
     st.success("Šiam mėnesiui neišrašytų nerasta.")
 else:
@@ -591,20 +754,26 @@ else:
         )
         st.markdown("**Klientai, kuriems liko neišrašyta**")
         st.dataframe(top_clients, use_container_width=True)
+section_footer()
 
-st.divider()
+left2, right2 = st.columns((1.1, 1))
 
-left, right = st.columns((1.1, 1))
-
-with left:
-    st.subheader("Sezonų pabaigos (imama iš sezono stulpelių, 2100-12-31 ignoruojama)")
+with left2:
+    section_header(
+        "Sezonų pabaigos",
+        "Imama tik iš sezono stulpelių. 2100-12-31 ignoruojama."
+    )
     if season_df.empty:
         st.info("Tinkamų sezonų pabaigų nuo ataskaitos datos nerasta.")
     else:
         st.dataframe(season_df, use_container_width=True)
+    section_footer()
 
-with right:
-    st.subheader("Sutartys, kurios baigiasi šį mėnesį")
+with right2:
+    section_header(
+        "Sutartys, kurios baigiasi šį mėnesį",
+        "Rodoma iš pilno istorinio rinkinio, todėl matysi ir jau anksčiau šį mėnesį pasibaigusias."
+    )
     if ending_this_month_df.empty:
         st.info("Šį mėnesį nesibaigia jokia terminuota sutartis.")
     else:
@@ -613,13 +782,14 @@ with right:
             if col and col in ending_this_month_df.columns and col not in cols:
                 cols.append(col)
         st.dataframe(ending_this_month_df[cols], use_container_width=True)
+    section_footer()
 
-st.divider()
-
-st.subheader("Klientų ir sutarčių statuso ataskaita")
+section_header(
+    "Klientų ir sutarčių statuso ataskaita",
+    "Pilnas klientų sąrašas su sutarčių numeriais ir statusu: galioja / negalioja."
+)
 st.dataframe(status_df, use_container_width=True)
-
-st.divider()
+section_footer()
 
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Aktyvios sutartys",
@@ -666,6 +836,6 @@ excel_bytes = build_export_excel({
 st.download_button(
     label="⬇️ Atsisiųsti analizės Excel",
     data=excel_bytes,
-    file_name="sutarciu_ir_saskaitu_analize_su_viso_galiojanciu.xlsx",
+    file_name="sutarciu_ir_saskaitu_analize_dizainas_atnaujintas.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
