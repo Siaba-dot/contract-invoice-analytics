@@ -25,7 +25,7 @@ def normalize_status(value):
     text = normalize_text(value).lower()
     replacements = {
         "į": "i", "š": "s", "ų": "u", "ū": "u", "ž": "z",
-        "ė": "e", "ą": "a", "č": "c"
+        "ė": "e", "ą": "a", "č": "c",
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
@@ -50,11 +50,19 @@ def standardize_yes_no(value):
     return normalize_text(value)
 
 
+def extract_base_month_name(column_name):
+    raw = str(column_name).strip()
+    if "." in raw:
+        left, right = raw.rsplit(".", 1)
+        if right.isdigit():
+            raw = left.strip()
+    return raw
+
+
 def find_month_columns(df):
     month_columns = []
     for col in df.columns:
-        raw = str(col).strip()
-        base = raw.split(".")[0].strip()
+        base = extract_base_month_name(col)
         if base in LT_MONTHS:
             month_columns.append(col)
     return month_columns
@@ -66,8 +74,7 @@ def build_timeline(month_columns, start_year):
     prev_month_num = None
 
     for col in month_columns:
-        raw = str(col).strip()
-        base = raw.split(".")[0].strip()
+        base = extract_base_month_name(col)
         month_num = MONTH_TO_NUM[base]
 
         if prev_month_num is not None and month_num < prev_month_num:
@@ -126,6 +133,78 @@ def prepare_dataframe(df):
     return out, month_columns
 
 
+def client_column_name(df):
+    for col in ["Klientas", "Pirkėjas", "Užsakovas", "Kliento pavadinimas"]:
+        if col in df.columns:
+            return col
+    return None
+
+
+def contract_column_name(df):
+    for col in ["Sutarties Nr.", "Sutarties nr.", "Sutarties numeris", "Sutartis", "Sutarties Nr", "Sutarties nr"]:
+        if col in df.columns:
+            return col
+    return None
+
+
+def object_column_name(df):
+    for col in ["Objektas", "Adresas", "Sutarties pavadinimas"]:
+        if col in df.columns:
+            return col
+    return None
+
+
+def _min_non_null(series):
+    s = pd.to_datetime(series, errors="coerce").dropna()
+    return s.min() if not s.empty else pd.NaT
+
+
+def _max_non_null(series):
+    s = pd.to_datetime(series, errors="coerce").dropna()
+    return s.max() if not s.empty else pd.NaT
+
+
+def _merge_status_series(series):
+    vals = [x for x in series if x in ("Išrašyta", "Neišrašyta")]
+    if not vals:
+        return ""
+    if "Neišrašyta" in vals:
+        return "Neišrašyta"
+    return "Išrašyta"
+
+
+def aggregate_contracts(df, month_columns):
+    contract_col = contract_column_name(df)
+    if contract_col is None:
+        return df.copy(), False, None
+
+    work = df.copy()
+    work[contract_col] = work[contract_col].astype(str).str.strip()
+    work = work[work[contract_col] != ""].copy()
+
+    agg_map = {}
+
+    for col in work.columns:
+        if col == contract_col:
+            continue
+        if col in month_columns:
+            agg_map[col] = _merge_status_series
+        elif col in ["Galioja nuo"]:
+            agg_map[col] = _min_non_null
+        elif col in ["Galioja iki", "Žiemos sezonas galioja iki", "Vasaros sezonas galioja iki", "Data"]:
+            agg_map[col] = _max_non_null
+        elif col in [
+            "Ar turi būti aktas", "Aktas išsiųstas", "Automatizuotas", "MMA", "Parduodamos prekės",
+            "Pasibaigusi sutartis (pildoma tik jeigu pasibaigė)"
+        ]:
+            agg_map[col] = lambda s: "Taip" if "Taip" in set(s.dropna().astype(str)) else ("Ne" if "Ne" in set(s.dropna().astype(str)) else "")
+        else:
+            agg_map[col] = lambda s: next((x for x in s if normalize_text(x) != ""), "")
+
+    out = work.groupby(contract_col, dropna=False, as_index=False).agg(agg_map)
+    return out, True, contract_col
+
+
 def is_contract_active_on(row, check_date):
     start = row.get("Galioja nuo", pd.NaT)
     end = row.get("Galioja iki", pd.NaT)
@@ -136,6 +215,17 @@ def is_contract_active_on(row, check_date):
     if pd.notna(end) and end != INDEFINITE_DATE and check_date > end:
         return False
 
+    return True
+
+
+def is_contract_active_in_month(row, month_start, month_end):
+    start = row.get("Galioja nuo", pd.NaT)
+    end = row.get("Galioja iki", pd.NaT)
+
+    if pd.notna(start) and start > month_end:
+        return False
+    if pd.notna(end) and end != INDEFINITE_DATE and end < month_start:
+        return False
     return True
 
 
@@ -208,12 +298,18 @@ def summarize_new_and_ended(df, timeline):
     return pd.DataFrame(rows)
 
 
-def summarize_unissued(df, timeline):
+def summarize_unissued_active_only(df, timeline):
     rows = []
     for item in timeline:
         col = item["column"]
-        issued = int((df[col] == "Išrašyta").sum())
-        unissued = int((df[col] == "Neišrašyta").sum())
+        month_start = item["period_start"]
+        month_end = item["period_start"] + pd.offsets.MonthEnd(0)
+
+        active_mask = df.apply(lambda r: is_contract_active_in_month(r, month_start, month_end), axis=1)
+        month_df = df[active_mask].copy()
+
+        issued = int((month_df[col] == "Išrašyta").sum())
+        unissued = int((month_df[col] == "Neišrašyta").sum())
         total_filled = issued + unissued
         pct = round((unissued / total_filled) * 100, 2) if total_filled else 0.0
 
@@ -223,36 +319,28 @@ def summarize_unissued(df, timeline):
                 "Išrašyta": issued,
                 "Neišrašyta": unissued,
                 "% neišrašyta": pct,
+                "Aktyvios sutartys mėnesyje": int(len(month_df)),
             }
         )
     return pd.DataFrame(rows)
 
 
-def client_column_name(df):
-    for col in ["Klientas", "Pirkėjas", "Užsakovas", "Kliento pavadinimas"]:
-        if col in df.columns:
-            return col
-    return None
-
-
-def contract_column_name(df):
-    for col in ["Sutartis", "Objektas", "Adresas", "Sutarties pavadinimas", "Sutarties nr."]:
-        if col in df.columns:
-            return col
-    return None
-
-
 def season_alerts(df, report_date):
     rows = []
-
     active_df = current_active_contracts(df, report_date)
 
-    for _, row in active_df.iterrows():
-        client_col = client_column_name(active_df)
-        contract_col = contract_column_name(active_df)
+    # only term contracts should have season changes
+    if "Galioja iki" in active_df.columns:
+        active_df = active_df[active_df["Galioja iki"] != INDEFINITE_DATE].copy()
 
+    client_col = client_column_name(active_df)
+    contract_col = contract_column_name(active_df)
+    obj_col = object_column_name(active_df)
+
+    for _, row in active_df.iterrows():
         client_val = row[client_col] if client_col else ""
         contract_val = row[contract_col] if contract_col else ""
+        obj_val = row[obj_col] if obj_col else ""
 
         for season_col, season_name in [
             ("Žiemos sezonas galioja iki", "Žiemos sezonas"),
@@ -261,30 +349,28 @@ def season_alerts(df, report_date):
             if season_col in active_df.columns:
                 end_date = row.get(season_col, pd.NaT)
                 if pd.notna(end_date) and end_date >= report_date:
-                    days_left = int((end_date - report_date).days)
                     rows.append(
                         {
                             "Klientas": client_val,
-                            "Sutartis / adresas": contract_val,
+                            "Sutarties Nr.": contract_val,
+                            "Objektas / adresas": obj_val,
                             "Sezonas": season_name,
                             "Galioja iki": end_date.date(),
-                            "Liko dienų": days_left,
+                            "Liko dienų": int((end_date - report_date).days),
                         }
                     )
 
     if not rows:
-        return pd.DataFrame(columns=["Klientas", "Sutartis / adresas", "Sezonas", "Galioja iki", "Liko dienų"])
+        return pd.DataFrame(columns=["Klientas", "Sutarties Nr.", "Objektas / adresas", "Sezonas", "Galioja iki", "Liko dienų"])
 
-    out = pd.DataFrame(rows).sort_values(["Galioja iki", "Klientas", "Sutartis / adresas"]).reset_index(drop=True)
-    return out
+    return pd.DataFrame(rows).sort_values(["Galioja iki", "Klientas", "Sutarties Nr."]).reset_index(drop=True)
 
 
 def build_export_excel(frames_dict):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         for sheet_name, frame in frames_dict.items():
-            safe_name = sheet_name[:31]
-            frame.to_excel(writer, index=False, sheet_name=safe_name)
+            frame.to_excel(writer, index=False, sheet_name=sheet_name[:31])
     output.seek(0)
     return output
 
@@ -303,31 +389,34 @@ sheet_names = excel_file.sheet_names
 with st.sidebar:
     st.header("Nustatymai")
     selected_sheet = st.selectbox("Lapas", sheet_names)
-
     st.markdown("**Svarbu:** jei mėnesių stulpeliai prasideda ne nuo sausio, startinius metus įvesk taip, kaip prasideda pirmas mėnesio stulpelis.")
     start_year = st.number_input("Pirmo mėnesio stulpelio metai", min_value=2020, max_value=2100, value=2025, step=1)
-
-    default_report_date = date.today()
-    report_date = pd.Timestamp(st.date_input("Ataskaitos data", value=default_report_date))
+    report_date = pd.Timestamp(st.date_input("Ataskaitos data", value=date.today()))
+    use_unique_contracts = st.toggle("Skaičiuoti pagal unikalius sutarčių numerius", value=True)
 
 df_raw = read_excel(uploaded_file, selected_sheet)
 df, month_columns = prepare_dataframe(df_raw)
 
 if not month_columns:
-    st.error("Nepavyko rasti mėnesių stulpelių. Jie turi būti pavadinti lietuviškai, pvz. Sausis, Vasaris, Kovas.")
+    st.error("Nepavyko rasti mėnesių stulpelių. Jie turi būti pavadinti Sausis, Vasaris, Kovas ir t. t.")
     st.stop()
+
+if use_unique_contracts:
+    analysis_df, aggregated, contract_id_col = aggregate_contracts(df, month_columns)
+else:
+    analysis_df, aggregated, contract_id_col = df.copy(), False, contract_column_name(df)
 
 timeline = build_timeline(month_columns, start_year)
 
-active_df = current_active_contracts(df, report_date)
-ending_this_month_df = contracts_ending_this_month(df, report_date)
-season_df = season_alerts(df, report_date)
-workload_df = summarize_workload_by_month(df, timeline)
-flow_df = summarize_new_and_ended(df, timeline)
-unissued_df = summarize_unissued(df, timeline)
+active_df = current_active_contracts(analysis_df, report_date)
+ending_this_month_df = contracts_ending_this_month(analysis_df, report_date)
+season_df = season_alerts(analysis_df, report_date)
+workload_df = summarize_workload_by_month(analysis_df, timeline)
+flow_df = summarize_new_and_ended(analysis_df, timeline)
+unissued_df = summarize_unissued_active_only(analysis_df, timeline)
 
-client_col = client_column_name(df)
-contract_col = contract_column_name(df)
+client_col = client_column_name(analysis_df)
+obj_col = object_column_name(analysis_df)
 
 contract_types = contract_type_series(active_df)
 active_contracts_count = len(active_df)
@@ -341,6 +430,15 @@ c2.metric("Neterminuotos", indefinite_count)
 c3.metric("Baigiasi šį mėnesį", terminated_this_month_count)
 c4.metric("Paskutinio mėnesio neišrašyta", current_unissued_count)
 
+with st.expander("Techninis patikrinimas"):
+    st.write("Rasti mėnesių stulpeliai iš Excel:", [str(c) for c in month_columns])
+    st.write("Sugeneruota laiko ašis:", [x["label"] for x in timeline])
+    st.write("Sutartys skaičiuojamos pagal unikalų numerį:", bool(use_unique_contracts))
+    st.write("Sutarties numerio stulpelis:", contract_id_col if contract_id_col else "Nerastas")
+    if aggregated:
+        st.write("Eilučių prieš sujungimą:", len(df))
+        st.write("Unikalių sutarčių po sujungimo:", len(analysis_df))
+
 st.divider()
 
 left, right = st.columns((1.2, 1))
@@ -353,12 +451,7 @@ with left:
 
 with right:
     st.subheader("Naujos ir pasibaigusios sutartys")
-    fig_flow = px.bar(
-        flow_df,
-        x="Mėnuo",
-        y=["Naujos sutartys", "Pasibaigusios sutartys"],
-        barmode="group"
-    )
+    fig_flow = px.bar(flow_df, x="Mėnuo", y=["Naujos sutartys", "Pasibaigusios sutartys"], barmode="group")
     fig_flow.update_layout(xaxis_title="", yaxis_title="Sutarčių skaičius")
     st.plotly_chart(fig_flow, use_container_width=True)
 
@@ -367,9 +460,9 @@ st.divider()
 left, right = st.columns((1.2, 1))
 
 with left:
-    st.subheader("Neišrašytos sąskaitos pagal mėnesius")
+    st.subheader("Neišrašytos sąskaitos pagal mėnesius (tik galiojančioms sutartims)")
     fig_unissued = px.bar(unissued_df, x="Mėnuo", y="Neišrašyta")
-    fig_unissued.update_layout(xaxis_title="", yaxis_title="Sąskaitų skaičius")
+    fig_unissued.update_layout(xaxis_title="", yaxis_title="Sutarčių su neišrašyta skaičius")
     st.plotly_chart(fig_unissued, use_container_width=True)
 
 with right:
@@ -380,18 +473,27 @@ with right:
 
 st.divider()
 
-selected_month_label = st.selectbox("Pasirink mėnesį detaliai peržiūrai", options=[x["label"] for x in timeline], index=len(timeline)-1)
+selected_month_label = st.selectbox(
+    "Pasirink mėnesį detaliai peržiūrai",
+    options=[x["label"] for x in timeline],
+    index=len(timeline) - 1
+)
 selected_item = next(x for x in timeline if x["label"] == selected_month_label)
 selected_month_col = selected_item["column"]
+selected_month_start = selected_item["period_start"]
+selected_month_end = selected_item["period_start"] + pd.offsets.MonthEnd(0)
 
-detail_df = df[df[selected_month_col] == "Neišrašyta"].copy()
+detail_df = analysis_df[
+    analysis_df.apply(lambda r: is_contract_active_in_month(r, selected_month_start, selected_month_end), axis=1)
+].copy()
+detail_df = detail_df[detail_df[selected_month_col] == "Neišrašyta"].copy()
 
-st.subheader(f"Neišrašytos sąskaitos: {selected_month_label}")
+st.subheader(f"Neišrašytos sąskaitos / sutartys: {selected_month_label}")
 if detail_df.empty:
-    st.success("Šiam mėnesiui neišrašytų sąskaitų nerasta.")
+    st.success("Šiam mėnesiui neišrašytų nerasta.")
 else:
     show_cols = []
-    for col in [client_col, contract_col, "Galioja nuo", "Galioja iki", "Ar turi būti aktas", "Aktas išsiųstas", "Automatizuotas", selected_month_col]:
+    for col in [client_col, contract_id_col, obj_col, "Galioja nuo", "Galioja iki", "Ar turi būti aktas", "Aktas išsiųstas", "Automatizuotas", selected_month_col]:
         if col and col in detail_df.columns and col not in show_cols:
             show_cols.append(col)
     st.dataframe(detail_df[show_cols], use_container_width=True)
@@ -411,9 +513,9 @@ st.divider()
 left, right = st.columns((1.1, 1))
 
 with left:
-    st.subheader("Sezonų pabaigos (tik aktyvioms sutartims)")
+    st.subheader("Sezonų pabaigos (tik terminuotoms aktyvioms sutartims)")
     if season_df.empty:
-        st.info("Aktyvių sezonų pabaigų nuo ataskaitos datos nerasta.")
+        st.info("Tinkamų sezonų pabaigų nuo ataskaitos datos nerasta.")
     else:
         st.dataframe(season_df, use_container_width=True)
 
@@ -423,30 +525,26 @@ with right:
         st.info("Šį mėnesį nesibaigia jokia terminuota sutartis.")
     else:
         cols = []
-        for col in [client_col, contract_col, "Galioja nuo", "Galioja iki", "Automatizuotas"]:
+        for col in [client_col, contract_id_col, obj_col, "Galioja nuo", "Galioja iki", "Automatizuotas"]:
             if col and col in ending_this_month_df.columns and col not in cols:
                 cols.append(col)
         st.dataframe(ending_this_month_df[cols], use_container_width=True)
 
 st.divider()
 
-st.subheader("Duomenų lentelės")
 tab1, tab2, tab3, tab4 = st.tabs([
     "Aktyvios sutartys",
     "Neišrašyta pagal mėnesius",
     "Sutarčių judėjimas",
-    "Visa paruošta lentelė",
+    "Visa lentelė",
 ])
 
 with tab1:
     active_show_cols = []
-    for col in [client_col, contract_col, "Galioja nuo", "Galioja iki", "Automatizuotas", "Ar turi būti aktas", "Aktas išsiųstas"]:
+    for col in [client_col, contract_id_col, obj_col, "Galioja nuo", "Galioja iki", "Automatizuotas", "Ar turi būti aktas", "Aktas išsiųstas"]:
         if col and col in active_df.columns and col not in active_show_cols:
             active_show_cols.append(col)
-    if active_show_cols:
-        st.dataframe(active_df[active_show_cols], use_container_width=True)
-    else:
-        st.dataframe(active_df, use_container_width=True)
+    st.dataframe(active_df[active_show_cols] if active_show_cols else active_df, use_container_width=True)
 
 with tab2:
     st.dataframe(unissued_df, use_container_width=True)
@@ -455,21 +553,19 @@ with tab3:
     st.dataframe(flow_df, use_container_width=True)
 
 with tab4:
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(analysis_df, use_container_width=True)
 
-export_frames = {
+excel_bytes = build_export_excel({
     "Aktyvios sutartys": active_df,
     "Neisrasyta pagal menesius": unissued_df,
     "Sutarciu judejimas": flow_df,
     "Sezonai": season_df,
     "Baigiasi si menesi": ending_this_month_df,
-}
-
-excel_bytes = build_export_excel(export_frames)
+})
 
 st.download_button(
     label="⬇️ Atsisiųsti analizės Excel",
     data=excel_bytes,
-    file_name="sutarciu_ir_saskaitu_analize.xlsx",
+    file_name="sutarciu_ir_saskaitu_analize_unikalios_sutartys.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
