@@ -272,7 +272,7 @@ def summarize_workload_by_month(df, timeline):
     for item in timeline:
         month_end = item["period_start"] + pd.offsets.MonthEnd(0)
         active_count = int(df.apply(lambda r: is_contract_active_on(r, month_end), axis=1).sum())
-        rows.append({"Mėnuo": item["label"], "Aktyvios sutartys": active_count})
+        rows.append({"Mėnuo": item["label"], "Aktyvių sutarčių portfelis mėnesio pabaigoje": active_count})
     return pd.DataFrame(rows)
 
 
@@ -377,6 +377,37 @@ def season_alerts(df, report_date):
     return pd.DataFrame(rows).sort_values(["Galioja iki", "Klientas", "Sutarties Nr."]).reset_index(drop=True)
 
 
+def contract_status_report(df, report_date):
+    client_col = client_column_name(df)
+    contract_col = contract_column_name(df)
+    obj_col = object_column_name(df)
+
+    rows = []
+    for _, row in df.iterrows():
+        start = row.get("Galioja nuo", pd.NaT)
+        end = row.get("Galioja iki", pd.NaT)
+
+        status = "Galioja"
+        if pd.notna(end) and end != INDEFINITE_DATE and end < report_date:
+            status = "Negalioja"
+
+        rows.append(
+            {
+                "Klientas": row.get(client_col, "") if client_col else "",
+                "Sutarties Nr.": row.get(contract_col, "") if contract_col else "",
+                "Objektas / adresas": row.get(obj_col, "") if obj_col else "",
+                "Galioja nuo": start,
+                "Galioja iki": end,
+                "Statusas": status,
+            }
+        )
+
+    report = pd.DataFrame(rows)
+    if not report.empty:
+        report = report.sort_values(["Klientas", "Sutarties Nr."], na_position="last").reset_index(drop=True)
+    return report
+
+
 def build_export_excel(frames_dict):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -412,15 +443,12 @@ if not month_columns:
     st.error("Nepavyko rasti mėnesių stulpelių. Jie turi būti pavadinti Sausis, Vasaris, Kovas ir t. t.")
     st.stop()
 
-# full data for "ending this month"
 if use_unique_contracts:
     analysis_df_all, aggregated, contract_id_col = aggregate_contracts(df, month_columns)
 else:
     analysis_df_all, aggregated, contract_id_col = df.copy(), False, contract_column_name(df)
 
-# filtered data for active analytics
 analysis_df = filter_only_valid_contracts(analysis_df_all, report_date)
-
 timeline = build_timeline(month_columns, start_year)
 
 active_df = current_active_contracts(analysis_df, report_date)
@@ -429,6 +457,7 @@ season_df = season_alerts(analysis_df, report_date)
 workload_df = summarize_workload_by_month(analysis_df, timeline)
 flow_df = summarize_new_and_ended(analysis_df_all, timeline)
 unissued_df = summarize_unissued_active_only(analysis_df, timeline)
+status_df = contract_status_report(analysis_df_all, report_date)
 
 client_col = client_column_name(analysis_df_all)
 obj_col = object_column_name(analysis_df_all)
@@ -461,8 +490,8 @@ st.divider()
 left, right = st.columns((1.2, 1))
 
 with left:
-    st.subheader("Aktyvių sutarčių apkrova pagal mėnesius")
-    fig_workload = px.line(workload_df, x="Mėnuo", y="Aktyvios sutartys", markers=True)
+    st.subheader("Aktyvių sutarčių portfelis mėnesio pabaigoje")
+    fig_workload = px.line(workload_df, x="Mėnuo", y="Aktyvių sutarčių portfelis mėnesio pabaigoje", markers=True)
     fig_workload.update_layout(xaxis_title="", yaxis_title="Sutarčių skaičius")
     st.plotly_chart(fig_workload, use_container_width=True)
 
@@ -549,10 +578,16 @@ with right:
 
 st.divider()
 
-tab1, tab2, tab3, tab4 = st.tabs([
+st.subheader("Klientų ir sutarčių statuso ataskaita")
+st.dataframe(status_df, use_container_width=True)
+
+st.divider()
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Aktyvios sutartys",
     "Neišrašyta pagal mėnesius",
     "Sutarčių judėjimas",
+    "Statuso ataskaita",
     "Visa lentelė",
 ])
 
@@ -570,6 +605,9 @@ with tab3:
     st.dataframe(flow_df, use_container_width=True)
 
 with tab4:
+    st.dataframe(status_df, use_container_width=True)
+
+with tab5:
     st.dataframe(analysis_df_all, use_container_width=True)
 
 excel_bytes = build_export_excel({
@@ -578,12 +616,13 @@ excel_bytes = build_export_excel({
     "Sutarciu judejimas": flow_df,
     "Sezonai": season_df,
     "Baigiasi si menesi": ending_this_month_df,
+    "Statuso ataskaita": status_df,
     "Pilnas analizes rinkinys": analysis_df_all,
 })
 
 st.download_button(
     label="⬇️ Atsisiųsti analizės Excel",
     data=excel_bytes,
-    file_name="sutarciu_ir_saskaitu_analize_galutine.xlsx",
+    file_name="sutarciu_ir_saskaitu_analize_su_statusais.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
