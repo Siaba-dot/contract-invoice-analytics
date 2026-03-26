@@ -15,9 +15,6 @@ MONTH_TO_NUM = {m: i + 1 for i, m in enumerate(LT_MONTHS)}
 INDEFINITE_DATE = pd.Timestamp("2100-12-31")
 
 
-# =========================
-# STILIUS
-# =========================
 def inject_css():
     st.markdown(
         """
@@ -165,9 +162,6 @@ def section_footer():
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-# =========================
-# PAGALBINĖS FUNKCIJOS
-# =========================
 def normalize_text(value):
     if pd.isna(value):
         return ""
@@ -687,9 +681,6 @@ def build_export_excel(frames_dict):
     return output
 
 
-# =========================
-# APP
-# =========================
 inject_css()
 
 st.markdown('<div class="main-title">📊 Sutarčių ir sąskaitų<br>registras</div>', unsafe_allow_html=True)
@@ -751,21 +742,36 @@ indefinite_count = int((contract_types == "Neterminuota").sum())
 terminated_this_month_count = len(ending_this_month_df)
 current_unissued_count = int(unissued_df.iloc[-1]["Neišrašyta"]) if not unissued_df.empty else 0
 
-k1, k2, k3, k4, k5, k6 = st.columns(6)
+current_month_start = pd.Timestamp(report_date.year, report_date.month, 1)
+current_month_end = current_month_start + pd.offsets.MonthEnd(0)
+
+if "Galioja nuo" in analysis_df_all.columns:
+    current_month_new_count = int(
+        (
+            (analysis_df_all["Galioja nuo"] >= current_month_start) &
+            (analysis_df_all["Galioja nuo"] <= current_month_end)
+        ).sum()
+    )
+else:
+    current_month_new_count = 0
+
+k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
 with k1:
     render_kpi_card("Šiuo metu aktyvių sutarčių", active_contracts_count, "Skaičiuojama pagal ataskaitos datą")
 with k2:
     render_kpi_card("Neterminuotos", indefinite_count, "Galiojimas iki 2100-12-31")
 with k3:
-    render_kpi_card("Baigiasi šį mėnesį", terminated_this_month_count, "Imama iš pilno istorinio rinkinio")
+    render_kpi_card("Naujos sutartys šį mėnesį", current_month_new_count, "Pagal stulpelį „Galioja nuo“")
 with k4:
-    render_kpi_card("Paskutinio mėnesio neišrašyta", current_unissued_count, "Tik galiojančioms sutartims")
+    render_kpi_card("Baigiasi šį mėnesį", terminated_this_month_count, "Imama iš pilno istorinio rinkinio")
 with k5:
+    render_kpi_card("Paskutinio mėnesio neišrašyta", current_unissued_count, "Tik galiojančioms sutartims")
+with k6:
     if len(season_switch_df) > 0:
         render_kpi_card("⚠️ Keisti sezoną nuo 1 d.", len(season_switch_df), "Praėjusį mėnesį baigėsi sezonas, todėl nuo šio mėnesio reikia taikyti kitą")
     else:
         render_kpi_card("Sezonų pokyčių nėra", "0", "Nuo šio mėnesio keitimų nereikia")
-with k6:
+with k7:
     render_kpi_card("Einamojo mėnesio klaidų įrašai", len(errors_df), "Imamos tik eilutės, kur Data nėra tuščia")
 
 section_header(
