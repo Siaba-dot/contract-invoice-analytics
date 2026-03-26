@@ -61,7 +61,11 @@ def inject_css():
             border-radius: 22px;
             padding: 1rem 1.1rem;
             box-shadow: 0 12px 28px rgba(29,78,216,0.08);
-            min-height: 120px;
+            min-height: 170px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
         }
 
         .kpi-title {
@@ -69,6 +73,8 @@ def inject_css():
             color: #5b6b7f;
             margin-bottom: 0.45rem;
             font-weight: 600;
+            line-height: 1.3;
+            min-height: 48px;
         }
 
         .kpi-value {
@@ -82,6 +88,8 @@ def inject_css():
         .kpi-note {
             font-size: 0.82rem;
             color: #6b7c93;
+            line-height: 1.35;
+            min-height: 44px;
         }
 
         .small-badge {
